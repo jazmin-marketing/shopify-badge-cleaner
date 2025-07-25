@@ -2,25 +2,24 @@ name: 🧹 Remove Expired Badges
 
 on:
   schedule:
-    - cron: '*/2 * * * *' # Runs every 2 minutes
+    - cron: '*/2 * * * *'  # Runs every 2 minutes
 
 jobs:
   run-script:
     runs-on: ubuntu-latest
-
     steps:
-      - name: ⬇️ Checkout Repository
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: 🔧 Setup Node.js
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '18'
 
-      - name: 📦 Install Dependencies
+      - name: Install dependencies
         run: npm install
 
-      - name: 🧹 Run Badge Cleaner Script
+      - name: Run cleaner script
         env:
           SHOPIFY_STORE_URL: ${{ secrets.SHOPIFY_STORE_URL }}
           SHOPIFY_ADMIN_API_ACCESS_TOKEN: ${{ secrets.SHOPIFY_ADMIN_API_ACCESS_TOKEN }}
