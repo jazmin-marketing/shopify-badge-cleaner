@@ -3,11 +3,11 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 const SHOP = process.env.SHOPIFY_STORE_URL;
-const TOKEN = process.env.SHOPIFY_TOKEN;
-const API_VERSION = '2024-07';
+const TOKEN = process.env.SHOPIFY_ADMIN_API_ACCESS_TOKEN;
+const API_VERSION = '2025-07';
 const ENDPOINT = `https://${SHOP}/admin/api/${API_VERSION}/graphql.json`;
 
-const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+const today = new Date();
 
 async function fetchProducts(cursor = null) {
   const query = `
@@ -21,10 +21,11 @@ async function fetchProducts(cursor = null) {
           node {
             id
             title
-            metafields(first: 10, namespace: "custom") {
+            metafields(first: 20, namespace: "custom") {
               edges {
                 node {
                   key
+                  type
                   value
                 }
               }
@@ -49,7 +50,8 @@ async function fetchProducts(cursor = null) {
 
   const result = await response.json();
   if (result.errors) {
-    throw new Error(JSON.stringify(result.errors, null, 2));
+    console.error("GraphQL errors:", result.errors);
+    throw new Error("GraphQL query failed");
   }
 
   return result.data.products;
@@ -60,7 +62,6 @@ async function updateMetafield(productId, newBadges) {
     mutation updateProductMetafield($metafields: [MetafieldsSetInput!]!) {
       metafieldsSet(metafields: $metafields) {
         metafields {
-          id
           key
           value
         }
@@ -97,6 +98,8 @@ async function updateMetafield(productId, newBadges) {
 
   if (errors.length > 0) {
     console.error(`❌ Failed to update metafield for ${productId}:`, errors);
+  } else {
+    console.log(`✅ Metafield updated for product ${productId}`);
   }
 }
 
@@ -104,28 +107,40 @@ async function removeBadge() {
   console.log('🔍 Fetching products...');
   let hasNextPage = true;
   let cursor = null;
+  let found = false;
 
   while (hasNextPage) {
     const products = await fetchProducts(cursor);
-    if (!products || !products.edges) throw new Error("Invalid product response");
+    if (!products || !products.edges) {
+      throw new Error("Invalid product response");
+    }
 
     for (const edge of products.edges) {
       const product = edge.node;
-      const metafields = {};
+      const metafieldMap = {};
       for (const { node } of product.metafields.edges) {
-        metafields[node.key] = node.value;
+        metafieldMap[node.key] = node.value;
       }
 
-      const badges = metafields['badges'] ? JSON.parse(metafields['badges']) : [];
-      const expirationDate = metafields['expiration_time'];
+      const badgesRaw = metafieldMap['badges'];
+      const expirationRaw = metafieldMap['expiration_time'];
 
-      const isExpired = expirationDate && new Date(expirationDate) < new Date(today);
+      const badges = badgesRaw ? JSON.parse(badgesRaw) : [];
       const hasNewIn = badges.includes('New In');
+
+      let isExpired = false;
+      if (expirationRaw) {
+        const expDate = new Date(expirationRaw);
+        isExpired = expDate < today;
+      }
 
       if (isExpired && hasNewIn) {
         const updatedBadges = badges.filter(b => b !== 'New In');
+        console.log(`🛠 Updating ${product.title} - Expired: ${expirationRaw}`);
         await updateMetafield(product.id, updatedBadges);
-        console.log(`✅ Removed 'New In' from: ${product.title}`);
+        found = true;
+      } else {
+        console.log(`ℹ️ Skipping ${product.title} - Expired: ${isExpired}, Has 'New In': ${hasNewIn}`);
       }
     }
 
@@ -135,7 +150,11 @@ async function removeBadge() {
     }
   }
 
-  console.log('✅ All done.');
+  if (!found) {
+    console.log("⚠️ No products found with 'New In' + expired date.");
+  } else {
+    console.log('✅ All applicable products updated.');
+  }
 }
 
 removeBadge().catch(err => {
