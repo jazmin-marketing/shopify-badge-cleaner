@@ -3,7 +3,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 const SHOP = process.env.SHOPIFY_STORE_URL;
-const TOKEN = process.env.SHOPIFY_ADMIN_API_ACCESS_TOKEN;
+const TOKEN = process.env.SHOPIFY_TOKEN;
 const API_VERSION = '2024-07';
 const ENDPOINT = `https://${SHOP}/admin/api/${API_VERSION}/graphql.json`;
 
