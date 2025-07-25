@@ -24,4 +24,4 @@ jobs:
         env:
           SHOPIFY_STORE_URL: ${{ secrets.SHOPIFY_STORE_URL }}
           SHOPIFY_ADMIN_API_ACCESS_TOKEN: ${{ secrets.SHOPIFY_TOKEN }}
-        run: node cleaner.js
+        run: node index.js
