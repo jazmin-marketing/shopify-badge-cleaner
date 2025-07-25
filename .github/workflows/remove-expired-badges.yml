@@ -2,7 +2,7 @@ name: 🧹 Remove Expired Badges
 
 on:
   schedule:
-    - cron: '*/5 * * * *'  # GitHub only supports every 5 mins
+    - cron: '0 3 * * *' # Runs daily at 3:00 AM UTC
 
 jobs:
   run-script:
