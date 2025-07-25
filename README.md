@@ -1,0 +1,1 @@
+# Shopify Badge Cleaner
