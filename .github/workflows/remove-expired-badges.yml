@@ -3,6 +3,7 @@ name: 🧹 Remove Expired Badges
 on:
   schedule:
     - cron: '*/5 * * * *' # Runs every 5 minutes
+  workflow_dispatch: # Allows manual trigger
 
 jobs:
   run-script:
@@ -23,5 +24,4 @@ jobs:
         env:
           SHOPIFY_STORE_URL: ${{ secrets.SHOPIFY_STORE_URL }}
           SHOPIFY_ADMIN_API_ACCESS_TOKEN: ${{ secrets.SHOPIFY_ADMIN_API_ACCESS_TOKEN }}
-
         run: node index.js
