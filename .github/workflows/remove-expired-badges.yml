@@ -8,6 +8,17 @@ on:
 jobs:
   run-script:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - store_name: main
+            STORE_URL: ${{ secrets.SHOPIFY_STORE_URL }}
+            TOKEN: ${{ secrets.SHOPIFY_TOKEN }}
+
+          - store_name: jazmin
+            STORE_URL: ${{ secrets.JAZMIN_STORE_URL }}
+            TOKEN: ${{ secrets.JAZMIN_TOKEN }}
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -20,8 +31,8 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Run cleaner script
+      - name: Run cleaner script for ${{ matrix.store_name }}
         env:
-          SHOPIFY_STORE_URL: ${{ secrets.SHOPIFY_STORE_URL }}
-          SHOPIFY_ADMIN_API_ACCESS_TOKEN: ${{ secrets.SHOPIFY_TOKEN }}
+          SHOPIFY_STORE_URL: ${{ matrix.STORE_URL }}
+          SHOPIFY_ADMIN_API_ACCESS_TOKEN: ${{ matrix.TOKEN }}
         run: node index.js
