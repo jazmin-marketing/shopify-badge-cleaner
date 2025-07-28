@@ -8,16 +8,10 @@ on:
 jobs:
   run-script:
     runs-on: ubuntu-latest
+
     strategy:
       matrix:
-        include:
-          - store_name: main
-            STORE_URL: ${{ secrets.SHOPIFY_STORE_URL }}
-            TOKEN: ${{ secrets.SHOPIFY_TOKEN }}
-
-          - store_name: jazmin
-            STORE_URL: ${{ secrets.JAZMIN_STORE_URL }}
-            TOKEN: ${{ secrets.JAZMIN_TOKEN }}
+        store_name: [main, jazmin]
 
     steps:
       - name: Checkout repository
@@ -31,8 +25,19 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - name: Set environment variables for ${{ matrix.store_name }}
+        id: set-env
+        run: |
+          if [ "${{ matrix.store_name }}" = "main" ]; then
+            echo "STORE_URL=${{ secrets.SHOPIFY_STORE_URL }}" >> $GITHUB_ENV
+            echo "STORE_TOKEN=${{ secrets.SHOPIFY_TOKEN }}" >> $GITHUB_ENV
+          elif [ "${{ matrix.store_name }}" = "jazmin" ]; then
+            echo "STORE_URL=${{ secrets.JAZMIN_STORE_URL }}" >> $GITHUB_ENV
+            echo "STORE_TOKEN=${{ secrets.JAZMIN_TOKEN }}" >> $GITHUB_ENV
+          fi
+
       - name: Run cleaner script for ${{ matrix.store_name }}
         env:
-          SHOPIFY_STORE_URL: ${{ matrix.STORE_URL }}
-          SHOPIFY_ADMIN_API_ACCESS_TOKEN: ${{ matrix.TOKEN }}
+          SHOPIFY_STORE_URL: ${{ env.STORE_URL }}
+          SHOPIFY_ADMIN_API_ACCESS_TOKEN: ${{ env.STORE_TOKEN }}
         run: node index.js
