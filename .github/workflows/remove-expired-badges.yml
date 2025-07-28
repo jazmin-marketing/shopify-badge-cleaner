@@ -2,7 +2,7 @@ name: 🧹 Remove Expired Badges
 
 on:
   schedule:
-    - cron: '0 21 * * *'
+    - cron: '0 20 * * *'
   workflow_dispatch:
 
 jobs:
