@@ -5,9 +5,13 @@ dotenv.config();
 const SHOP = process.env.SHOPIFY_STORE_URL;
 const TOKEN = process.env.SHOPIFY_ADMIN_API_ACCESS_TOKEN;
 const API_VERSION = '2025-07';
-const ENDPOINT = `https://${SHOP}/admin/api/${API_VERSION}/graphql.json`;
-
+const GRAPHQL_ENDPOINT = `https://${SHOP}/admin/api/${API_VERSION}/graphql.json`;
+const REST_ENDPOINT_BASE = `https://${SHOP}/admin/api/${API_VERSION}`;
 const today = new Date();
+
+let badgeRemovedCount = 0;
+let metafieldDeletedCount = 0;
+let updatedProducts = [];
 
 async function fetchProducts(cursor = null) {
   const query = `
@@ -21,10 +25,10 @@ async function fetchProducts(cursor = null) {
           node {
             id
             title
+            legacyResourceId
             metafields(first: 20, namespace: "custom") {
               edges {
                 node {
-                  id
                   key
                   type
                   value
@@ -37,16 +41,13 @@ async function fetchProducts(cursor = null) {
     }
   `;
 
-  const response = await fetch(ENDPOINT, {
+  const response = await fetch(GRAPHQL_ENDPOINT, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'X-Shopify-Access-Token': TOKEN
     },
-    body: JSON.stringify({
-      query,
-      variables: { cursor }
-    })
+    body: JSON.stringify({ query, variables: { cursor } })
   });
 
   const result = await response.json();
@@ -58,7 +59,7 @@ async function fetchProducts(cursor = null) {
   return result.data.products;
 }
 
-async function updateMetafield(productId, newBadges) {
+async function updateMetafield(productId, productTitle, newBadges) {
   const mutation = `
     mutation updateProductMetafield($metafields: [MetafieldsSetInput!]!) {
       metafieldsSet(metafields: $metafields) {
@@ -82,60 +83,69 @@ async function updateMetafield(productId, newBadges) {
     ownerId: productId
   }];
 
-  const response = await fetch(ENDPOINT, {
+  const response = await fetch(GRAPHQL_ENDPOINT, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'X-Shopify-Access-Token': TOKEN
     },
-    body: JSON.stringify({
-      query: mutation,
-      variables: { metafields }
-    })
+    body: JSON.stringify({ query: mutation, variables: { metafields } })
   });
 
   const result = await response.json();
   const errors = result.errors || result.data?.metafieldsSet?.userErrors || [];
 
   if (errors.length > 0) {
-    console.error(`❌ Failed to update metafield for ${productId}:`, errors);
+    console.error(`❌ Failed to update metafield for ${productTitle}:`, errors);
   } else {
-    console.log(`✅ Metafield 'badges' updated for product ${productId}`);
+    console.log(`✅ Removed 'New In' badge for: ${productTitle}`);
+    badgeRemovedCount++;
+    updatedProducts.push(`${productTitle} - Badge Removed`);
   }
 }
 
-async function deleteMetafield(metafieldId, productTitle) {
-  const mutation = `
-    mutation deleteMetafield($id: ID!) {
-      metafieldDelete(input: { id: $id }) {
-        deletedId
-        userErrors {
-          field
-          message
-        }
-      }
-    }
-  `;
+async function deleteExpirationMetafield(productLegacyId, productTitle) {
+  const url = `${REST_ENDPOINT_BASE}/products/${productLegacyId}/metafields.json`;
 
-  const response = await fetch(ENDPOINT, {
-    method: 'POST',
+  const response = await fetch(url, {
+    method: 'GET',
     headers: {
-      'Content-Type': 'application/json',
-      'X-Shopify-Access-Token': TOKEN
-    },
-    body: JSON.stringify({
-      query: mutation,
-      variables: { id: metafieldId }
-    })
+      'X-Shopify-Access-Token': TOKEN,
+      'Content-Type': 'application/json'
+    }
   });
 
-  const result = await response.json();
-  const errors = result.errors || result.data?.metafieldDelete?.userErrors || [];
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error(`❌ Failed to fetch metafields for ${productTitle}: ${response.status} - ${errorText}`);
+    return;
+  }
 
-  if (errors.length > 0) {
-    console.error(`❌ Failed to delete expiration_time for ${productTitle}:`, errors);
+  const data = await response.json();
+  const metafield = data.metafields.find(mf => mf.namespace === 'custom' && mf.key === 'expiration_time');
+
+  if (!metafield) {
+    console.log(`ℹ️ No expiration_time metafield found for ${productTitle}`);
+    return;
+  }
+
+  const deleteUrl = `${REST_ENDPOINT_BASE}/metafields/${metafield.id}.json`;
+
+  const deleteResponse = await fetch(deleteUrl, {
+    method: 'DELETE',
+    headers: {
+      'X-Shopify-Access-Token': TOKEN,
+      'Content-Type': 'application/json'
+    }
+  });
+
+  if (deleteResponse.ok) {
+    console.log(`🗑️ Deleted expiration_time for: ${productTitle}`);
+    metafieldDeletedCount++;
+    updatedProducts.push(`${productTitle} - Expiration Removed`);
   } else {
-    console.log(`🗑️ Expired 'expiration_time' deleted for ${productTitle}`);
+    const err = await deleteResponse.text();
+    console.error(`❌ Failed to delete expiration_time for ${productTitle}: ${deleteResponse.status} - ${err}`);
   }
 }
 
@@ -153,14 +163,11 @@ async function removeBadge() {
 
     for (const edge of products.edges) {
       const product = edge.node;
+      const productLegacyId = product.legacyResourceId;
       const metafieldMap = {};
-      let expirationMetafieldId = null;
 
       for (const { node } of product.metafields.edges) {
         metafieldMap[node.key] = node.value;
-        if (node.key === 'expiration_time') {
-          expirationMetafieldId = node.id;
-        }
       }
 
       const badgesRaw = metafieldMap['badges'];
@@ -175,15 +182,15 @@ async function removeBadge() {
         isExpired = expDate < today;
       }
 
-      if (isExpired && (hasNewIn || expirationMetafieldId)) {
+      if (isExpired && (hasNewIn || expirationRaw)) {
         if (hasNewIn) {
           const updatedBadges = badges.filter(b => b !== 'New In');
           console.log(`🛠 Updating ${product.title} - Removing 'New In' badge`);
-          await updateMetafield(product.id, updatedBadges);
+          await updateMetafield(product.id, product.title, updatedBadges);
         }
 
-        if (expirationMetafieldId) {
-          await deleteMetafield(expirationMetafieldId, product.title);
+        if (expirationRaw) {
+          await deleteExpirationMetafield(productLegacyId, product.title);
         }
 
         found = true;
@@ -194,14 +201,26 @@ async function removeBadge() {
 
     hasNextPage = products.pageInfo.hasNextPage;
     if (hasNextPage) {
-      cursor = products.edges[products.edges.length - 1].cursor;
+      const lastEdge = products.edges[products.edges.length - 1];
+      cursor = lastEdge?.cursor ?? null;
     }
   }
 
+  console.log('\n🎯 Final Summary:');
+  console.log(`✅ Products with 'New In' badge removed: ${badgeRemovedCount}`);
+  console.log(`🗑️ Products with 'expiration_time' metafield deleted: ${metafieldDeletedCount}`);
+
+  if (updatedProducts.length > 0) {
+    console.log(`\n📦 Updated Products:`);
+    updatedProducts.forEach((title, idx) => {
+      console.log(`  ${idx + 1}. ${title}`);
+    });
+  }
+
   if (!found) {
-    console.log("⚠️ No products found with 'New In' + expired date.");
+    console.log("⚠️ No expired products with 'New In' badge found.");
   } else {
-    console.log('✅ All applicable products updated and expired metafields deleted.');
+    console.log('✅ Badge and metafield cleanup completed.');
   }
 }
 
