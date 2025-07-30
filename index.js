@@ -24,6 +24,7 @@ async function fetchProducts(cursor = null) {
             metafields(first: 20, namespace: "custom") {
               edges {
                 node {
+                  id
                   key
                   type
                   value
@@ -99,7 +100,42 @@ async function updateMetafield(productId, newBadges) {
   if (errors.length > 0) {
     console.error(`❌ Failed to update metafield for ${productId}:`, errors);
   } else {
-    console.log(`✅ Metafield updated for product ${productId}`);
+    console.log(`✅ Metafield 'badges' updated for product ${productId}`);
+  }
+}
+
+async function deleteMetafield(metafieldId, productTitle) {
+  const mutation = `
+    mutation deleteMetafield($id: ID!) {
+      metafieldDelete(input: { id: $id }) {
+        deletedId
+        userErrors {
+          field
+          message
+        }
+      }
+    }
+  `;
+
+  const response = await fetch(ENDPOINT, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Shopify-Access-Token': TOKEN
+    },
+    body: JSON.stringify({
+      query: mutation,
+      variables: { id: metafieldId }
+    })
+  });
+
+  const result = await response.json();
+  const errors = result.errors || result.data?.metafieldDelete?.userErrors || [];
+
+  if (errors.length > 0) {
+    console.error(`❌ Failed to delete expiration_time for ${productTitle}:`, errors);
+  } else {
+    console.log(`🗑️ Expired 'expiration_time' deleted for ${productTitle}`);
   }
 }
 
@@ -118,8 +154,13 @@ async function removeBadge() {
     for (const edge of products.edges) {
       const product = edge.node;
       const metafieldMap = {};
+      let expirationMetafieldId = null;
+
       for (const { node } of product.metafields.edges) {
         metafieldMap[node.key] = node.value;
+        if (node.key === 'expiration_time') {
+          expirationMetafieldId = node.id;
+        }
       }
 
       const badgesRaw = metafieldMap['badges'];
@@ -134,10 +175,17 @@ async function removeBadge() {
         isExpired = expDate < today;
       }
 
-      if (isExpired && hasNewIn) {
-        const updatedBadges = badges.filter(b => b !== 'New In');
-        console.log(`🛠 Updating ${product.title} - Expired: ${expirationRaw}`);
-        await updateMetafield(product.id, updatedBadges);
+      if (isExpired && (hasNewIn || expirationMetafieldId)) {
+        if (hasNewIn) {
+          const updatedBadges = badges.filter(b => b !== 'New In');
+          console.log(`🛠 Updating ${product.title} - Removing 'New In' badge`);
+          await updateMetafield(product.id, updatedBadges);
+        }
+
+        if (expirationMetafieldId) {
+          await deleteMetafield(expirationMetafieldId, product.title);
+        }
+
         found = true;
       } else {
         console.log(`ℹ️ Skipping ${product.title} - Expired: ${isExpired}, Has 'New In': ${hasNewIn}`);
@@ -153,7 +201,7 @@ async function removeBadge() {
   if (!found) {
     console.log("⚠️ No products found with 'New In' + expired date.");
   } else {
-    console.log('✅ All applicable products updated.');
+    console.log('✅ All applicable products updated and expired metafields deleted.');
   }
 }
 
